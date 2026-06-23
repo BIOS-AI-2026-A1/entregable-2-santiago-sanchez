@@ -42,7 +42,9 @@ class Settings:
     validator_model: str = "claude-sonnet-4-6"
     haiku_model: str = "claude-haiku-4-5"
     # Web discovery agent (v3): reasons freely + uses the Anthropic web search tool.
-    web_search_model: str = "claude-sonnet-4-6"
+    # Haiku is sufficient here — the agent only discovers/extracts candidates; the
+    # Validator (Sonnet) still makes every safety judgment downstream.
+    web_search_model: str = "claude-haiku-4-5"
     max_search_results_per_query: int = 20
     # Cap on Google text-search queries per Search run (city x term matrix can be
     # large); keeps a run within the daily API budget. 0 = unlimited.
@@ -76,7 +78,7 @@ class Settings:
             tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
             validator_model=os.getenv("VALIDATOR_MODEL", "claude-sonnet-4-6").strip(),
             haiku_model=os.getenv("HAIKU_MODEL", "claude-haiku-4-5").strip(),
-            web_search_model=os.getenv("WEB_SEARCH_MODEL", "claude-sonnet-4-6").strip(),
+            web_search_model=os.getenv("WEB_SEARCH_MODEL", "claude-haiku-4-5").strip(),
             max_search_results_per_query=_int("MAX_SEARCH_RESULTS_PER_QUERY", 20),
             max_search_queries_per_run=_int("MAX_SEARCH_QUERIES_PER_RUN", 80),
             max_validations_per_run=_int("MAX_VALIDATIONS_PER_RUN", 50),

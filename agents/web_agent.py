@@ -13,7 +13,7 @@ like the Social agent does:
 1. Pick the cities to research from ``config/targets.yaml`` — only those flagged
    ``web: true`` (capped by ``max_cities`` and the pipeline's shared budget), so
    v3 can be rolled out one city at a time.
-2. Ask the model (default ``claude-sonnet-4-6``) for candidates with supporting
+2. Ask the model (default ``claude-haiku-4-5``) for candidates with supporting
    evidence + a source URL (no coordinates — web mentions have none).
 3. Geocode each lead with Google Find Place (``name + city``) to obtain real
    coordinates and a canonical Google ``place_id``. Leads that cannot be resolved

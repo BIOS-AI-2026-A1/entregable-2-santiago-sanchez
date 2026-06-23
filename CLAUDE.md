@@ -126,14 +126,15 @@ GEOGRAPHIC SCOPE
   title/snippet into a clean `{name, city, category, address}` lead is exactly the
   cheap, high-volume free-text task Haiku is suited to; the heavier Validator gate
   (Sonnet) still judges every social candidate afterwards.
-- **Web (v3) → `claude-sonnet-4-6`** with the Anthropic web search tool. Unlike
-  the cheap Social parse, this is a genuinely agentic task — the model writes its
-  own queries, reads forums/blogs/IG/FB, and extracts candidates with evidence.
-  Sonnet 4.6 is the cost/quality balance for a recurring daily batch; upgradeable
-  to `claude-opus-4-8` via the `WEB_SEARCH_MODEL` env var (one-line flip, no code
-  change) if discovery quality proves weak. The Sonnet Validator still gates every
-  web candidate, and every lead must geocode to a real Google `place_id`, so a
-  hallucinated place is dropped before it can be published.
+- **Web (v3) → `claude-haiku-4-5`** with the Anthropic web search tool. The agent
+  only **discovers and extracts** candidates (it writes its own queries, reads
+  forums/blogs/IG/FB, and pulls names + evidence + a source URL) — it makes **no**
+  safety judgment, so Haiku is sufficient and materially cheaper for a recurring
+  daily batch (changed Jun 2026 from `claude-sonnet-4-6`). Quality is upgradeable
+  to `claude-sonnet-4-6` / `claude-opus-4-8` via the `WEB_SEARCH_MODEL` env var
+  (one-line flip, no code change) if discovery quality proves weak. The **Sonnet**
+  Validator still gates every web candidate, and every lead must geocode to a real
+  Google `place_id`, so a hallucinated place is dropped before it can be published.
 - **Provider strategy:** standardize on Anthropic behind a thin
   `agents/clients/llm.py` wrapper so OpenAI / DeepSeek can be swapped if cost
   demands, without touching agent logic.
@@ -550,8 +551,10 @@ it adds a smarter third funnel that feeds the **same unchanged Validator gate**.
 - **Schema gap fixed.** `social_url` was used by the Social agent in code but was
   missing from `db/schema.sql`; it is now added there (idempotently) since v3
   reuses it. `places.source` and `agent_log.agent` CHECKs gained `'web'`.
-- **Model — `claude-sonnet-4-6`** (see the Web bullet under **AI model
-  decisions**); `WEB_SEARCH_MODEL` allows a one-line upgrade to `claude-opus-4-8`.
+- **Model — `claude-haiku-4-5`** (changed Jun 2026 from `claude-sonnet-4-6`; the
+  agent only discovers/extracts, the Sonnet Validator still judges safety — see the
+  Web bullet under **AI model decisions**); `WEB_SEARCH_MODEL` allows a one-line
+  upgrade back to `claude-sonnet-4-6` / `claude-opus-4-8`.
 
 ### AI Toolkit (prompts + Skill + MCP server) design decisions
 
