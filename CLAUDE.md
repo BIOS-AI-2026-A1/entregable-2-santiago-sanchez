@@ -404,6 +404,10 @@ Do not wait to be asked. Keep documentation in sync with the code.
 - Keep the repository clean.
 - If a slash command is created, it must be committed within the project.
 
+## Skills
+- skills/prompt-engineer/SKILL.md — load when writing,
+  improving, or debugging any prompt for an LLM
+
 ## Quality Criteria
 
 The result must be presentable as:
