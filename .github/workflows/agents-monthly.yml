@@ -1,13 +1,14 @@
-# Agents - daily pipeline.
-# Runs the CeliacMap agent pipeline (search -> validator -> updater) once per day.
+# Agents - monthly pipeline.
+# Runs the CeliacMap agent pipeline (search -> validator -> updater) once per month.
 # Manual runs (workflow_dispatch) can validate the pipeline first - the dry_run
-# toggle gives a no-write rehearsal - before relying on the daily cron.
-name: Agents - daily pipeline
+# toggle gives a no-write rehearsal - before relying on the monthly cron.
+name: Agents - monthly pipeline
 
 on:
   schedule:
-    # 09:00 UTC daily (~06:00 in Uruguay / Argentina). Cron uses the default branch.
-    - cron: "0 9 * * *"
+    # 09:00 UTC on the 1st of each month (~06:00 in Uruguay / Argentina).
+    # Cron uses the default branch.
+    - cron: '0 9 1 * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -22,9 +23,9 @@ on:
 permissions:
   contents: read
 
-# Never let two pipeline runs overlap (they share one daily budget / database).
+# Never let two pipeline runs overlap (they share one budget / database).
 concurrency:
-  group: agents-daily
+  group: agents-monthly
   cancel-in-progress: false
 
 jobs:

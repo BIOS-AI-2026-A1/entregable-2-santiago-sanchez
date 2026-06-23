@@ -41,7 +41,7 @@ places nearby, starting in Uruguay and Argentina and scaling across Latin Americ
 - ✅ **Pipeline orchestrator** (`scripts/run_agents.py`) — runs all six agents
   (search → social → web → suggestion → validator → updater) under one combined
   daily budget, with a `--dry-run` mode.
-- ✅ **GitHub Actions daily cron** — runs the pipeline once per day (manual
+- ✅ **GitHub Actions monthly cron** — runs the pipeline once per month (manual
   `workflow_dispatch` with a dry-run toggle for validation).
 - ✅ **Deployed to GitHub Pages** — the frontend ships automatically from `main`
   via GitHub Actions ([live demo](https://santisanchez4.github.io/CeliacMap/)).
@@ -226,7 +226,7 @@ serif display headings over a clean sans body, and generous spacing.
 │   ├── schema.sql              # tables (+ suggestions), constraints, indexes, RLS, triggers
 │   └── seed.sql                # manual seed (UY/AR)
 ├── tests/                      # offline unit tests (all external calls mocked)
-├── .github/workflows/          # agents-daily cron + Pages deploy
+├── .github/workflows/          # agents-monthly cron + Pages deploy
 ├── requirements.txt
 ├── .env.example
 └── README.md  CLAUDE.md  prompts.md  .gitignore
@@ -268,9 +268,9 @@ needed:
 python -m pytest tests/ -v
 ```
 
-In production the pipeline runs automatically once per day via the
-`Agents — daily pipeline` GitHub Actions workflow
-([`.github/workflows/agents-daily.yml`](.github/workflows/agents-daily.yml)); it
+In production the pipeline runs automatically once per month via the
+`Agents — monthly pipeline` GitHub Actions workflow
+([`.github/workflows/agents-monthly.yml`](.github/workflows/agents-monthly.yml)); it
 can also be triggered manually (with a dry-run toggle) from the Actions tab.
 
 Secrets (Supabase `service_role`, Google Places, Tavily, Anthropic) live only in

@@ -78,9 +78,9 @@ AGENTS (Python)
     updates Supabase accordingly. Deterministic diff (no LLM by default).
 
 AUTOMATION
-- GitHub Actions cron job (free tier): runs all agents once per day.
+- GitHub Actions cron job (free tier): runs all agents once per month.
 - Manual workflow_dispatch is used to validate the pipeline before
-  enabling the daily cron.
+  enabling the monthly cron.
 
 GEOGRAPHIC SCOPE
 - Phase 1: Uruguay and Argentina.
@@ -315,7 +315,7 @@ Target (functional product — see **## Architecture**):
 │   ├── schema.sql              # tables, constraints, indexes, RLS, triggers
 │   └── seed.sql                # manual seed (UY/AR)
 ├── tests/                      # offline unit tests (external calls mocked)
-├── .github/workflows/{agents-daily,deploy-pages}.yml
+├── .github/workflows/{agents-monthly,deploy-pages}.yml
 ├── requirements.txt
 ├── .env.example
 ├── README.md  CLAUDE.md  prompts.md  .gitignore
@@ -667,11 +667,13 @@ approved rows.
   `pipeline_run_complete` summary to `agent_log`). A live pipeline run completed
   with no errors (82/200 budget used). The `agent_log.agent` CHECK constraint was
   widened to allow `'pipeline'` so the orchestrator can persist its run summary.
-- ✅ **Phase 8 — GitHub Actions daily cron.** `.github/workflows/agents-daily.yml`
-  runs the pipeline once per day (09:00 UTC) and on manual `workflow_dispatch`
+- ✅ **Phase 8 — GitHub Actions scheduled cron.** `.github/workflows/agents-monthly.yml`
+  runs the pipeline on a schedule (09:00 UTC) and on manual `workflow_dispatch`
   (with a `dry_run` toggle and optional `budget` override). Secrets come from
   GitHub Actions Secrets; `.env.example` documents every variable. CI actions are
-  pinned to Node 24 majors (`checkout@v5`, `setup-python@v6`).
+  pinned to Node 24 majors (`checkout@v5`, `setup-python@v6`). _(Schedule switched
+  from daily to **monthly** — `0 9 1 * *`, the 1st of each month — and the workflow
+  renamed `agents-daily.yml` → `agents-monthly.yml`, Jun 2026.)_
 - ✅ **Phase 9 — GitHub Pages deploy.** `.github/workflows/deploy-pages.yml`
   publishes only the static frontend (`index.html`, `css/`, `js/`, `assets/`) from
   `main` via `upload-pages-artifact@v3` + `deploy-pages@v5`. Live at
