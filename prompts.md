@@ -645,3 +645,21 @@ the Supabase REST API with the public anon key.
 
 No new LLM prompt was introduced — promoted user suggestions are judged by the same
 canonical Validator `RUBRIC` (§12) as every other pending candidate.
+
+## 15. Switch web_agent to Haiku
+
+- **Trigger:** reduce token cost for the discovery agent.
+- **Change:** `web_search_model` → `claude-haiku-4-5` (was `claude-sonnet-4-6`).
+- **Files:** `config/settings.py`, `agents/web_agent.py`, `.env.example`, `CLAUDE.md`.
+- **Rationale:** the Web agent only discovers and extracts candidates — it makes no
+  safety judgment, so Haiku is sufficient and materially cheaper. The Sonnet
+  Validator still gates every web candidate downstream, and `WEB_SEARCH_MODEL`
+  allows a one-line flip back to Sonnet/Opus if discovery quality proves weak.
+
+## 16. Add prompt-engineer skill
+
+- **Trigger:** professor recommended the Vercel skills format.
+- **Created:** `skills/prompt-engineer/SKILL.md`.
+- **Registered in:** `CLAUDE.md` under the `## Skills` section.
+- **Format:** YAML frontmatter + Markdown (modern standard, replaces HTML-based
+  skill conventions).
