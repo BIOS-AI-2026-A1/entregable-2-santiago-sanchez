@@ -126,6 +126,46 @@ alter table public.places add column if not exists opening_hours      jsonb;
 alter table public.places add column if not exists rating             numeric;
 alter table public.places add column if not exists user_ratings_total integer;
 
+-- Outreach Agent (docs/plans/PLAN-outreach-agent.md): track whether a
+-- needs_review place's business has been contacted for confirmation, and
+-- through which channel, so the pipeline's send stage doesn't re-contact the
+-- same place every run. outreach_channel stays null until the first attempt,
+-- since not every place has resolvable contact info.
+alter table public.places add column if not exists outreach_status text
+  not null default 'not_sent'
+  check (outreach_status in ('not_sent', 'sent', 'replied', 'no_response'));
+alter table public.places add column if not exists outreach_channel text
+  check (outreach_channel is null or outreach_channel in ('email', 'whatsapp'));
+
+-- Outreach Agent (ADR-002): a business's outreach reply that strengthens
+-- needs_review evidence lands in a new 'outreach_confirmed' status — still
+-- awaiting final human approval, never auto-'approved'. On an already-created
+-- table the inline check above is a no-op, so widen it in place.
+do $$
+begin
+  alter table public.places drop constraint if exists places_status_check;
+  alter table public.places
+    add constraint places_status_check
+    check (status in
+      ('pending', 'approved', 'discarded', 'needs_review', 'outreach_confirmed'));
+end $$;
+
+-- Outreach Agent (PLAN-outreach-agent.md, ADR-002): full send/reply audit
+-- thread, one row per message, so the Validator's re-evaluation and any human
+-- review see the complete back-and-forth, not just the latest state.
+create table if not exists public.outreach_messages (
+  id          uuid primary key default gen_random_uuid(),
+  place_id    uuid not null references public.places(id) on delete cascade,
+  direction   text not null
+                check (direction in ('sent', 'received')),
+  channel     text not null
+                check (channel in ('email', 'whatsapp')),
+  content     text not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists outreach_messages_place_id_idx on public.outreach_messages (place_id);
+
 -- ---------------------------------------------------------------------
 -- Table: reviews
 -- ---------------------------------------------------------------------
@@ -257,12 +297,16 @@ alter table public.places      enable row level security;
 alter table public.reviews     enable row level security;
 alter table public.agent_log   enable row level security;
 alter table public.suggestions enable row level security;
+alter table public.outreach_messages enable row level security;
 
 -- Table-level privileges (RLS still gates rows).
 grant select on public.places  to anon, authenticated;
 grant select on public.reviews to anon, authenticated;
 -- agent_log is server-only: make sure public roles cannot touch it.
 revoke all on public.agent_log from anon, authenticated;
+-- outreach_messages is server-only (Outreach Agent), same as agent_log: make
+-- sure public roles cannot touch it.
+revoke all on public.outreach_messages from anon, authenticated;
 -- suggestions: the public form may INSERT only — never read back others'
 -- submissions, update or delete. (Reads/updates happen server-side via the
 -- service_role key, which bypasses RLS.)
@@ -293,6 +337,9 @@ create policy "public read reviews of approved places"
 
 -- agent_log: no policy for anon/authenticated => fully denied to the public.
 -- (service_role bypasses RLS and retains full access.)
+
+-- outreach_messages: no policy for anon/authenticated => fully denied to the
+-- public, same as agent_log. (service_role bypasses RLS and retains full access.)
 
 -- suggestions: the public may only INSERT a fresh submission. The WITH CHECK
 -- forces a safe initial state (status='new', not pre-promoted) and requires a

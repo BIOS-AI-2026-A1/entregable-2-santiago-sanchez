@@ -1,4 +1,4 @@
-"""Pipeline orchestrator — runs Search -> Social -> Web -> Suggestion -> Validator -> Updater.
+"""Pipeline orchestrator — runs Search -> Social -> Web -> Suggestion -> Validator -> Updater -> Outreach.
 
 This is the CI entrypoint for the daily GitHub Actions cron (and for manual
 ``workflow_dispatch`` validation). It:
@@ -28,8 +28,10 @@ from typing import Any
 
 from agents.clients.google_places import GooglePlacesClient
 from agents.clients.llm import LLMClient
+from agents.clients.resend_client import ResendClient
 from agents.clients.supabase_client import SupabaseClient
 from agents.clients.tavily_client import TavilySearchClient
+from agents.outreach_agent import OutreachAgent
 from agents.search_agent import SearchAgent
 from agents.social_agent import SocialAgent
 from agents.suggestion_agent import SuggestionAgent
@@ -68,6 +70,9 @@ class DryRunSupabase:
     def fetch_new_suggestions(self, limit: int = 50) -> list[dict]:
         return self._inner.fetch_new_suggestions(limit=limit)
 
+    def fetch_needs_review_for_outreach(self, limit: int = 100) -> list[dict]:
+        return self._inner.fetch_needs_review_for_outreach(limit=limit)
+
     # --- writes become no-ops ----------------------------------------
     def update_suggestion_status(
         self, suggestion_id: str, status: str, promoted_place_id: str | None = None
@@ -89,6 +94,10 @@ class DryRunSupabase:
 
     def update_place_validation(self, place_id: str, **kwargs: Any) -> None:
         logger.info("[dry-run] would set validation on %s -> %s", place_id, kwargs)
+
+    def insert_outreach_message(self, place_id: str, **kwargs: Any) -> None:
+        logger.info("[dry-run] would insert outreach message for place %s", place_id)
+        return None
 
     def insert_agent_log(self, *args: Any, **kwargs: Any) -> None:
         # Keep the audit trail clean during dry runs — nothing is persisted.
@@ -136,7 +145,7 @@ def _transient_error_count(overall: dict[str, Any]) -> int:
 def run_pipeline(
     settings: Settings, *, dry_run: bool, budget_total: int
 ) -> dict[str, Any]:
-    """Run search -> social -> web -> suggestion -> validator -> updater under one combined budget."""
+    """Run search -> social -> web -> suggestion -> validator -> updater -> outreach under one combined budget."""
     targets = load_targets()
     raw_db = SupabaseClient(
         settings.supabase_url, settings.supabase_service_role_key
@@ -276,6 +285,28 @@ def run_pipeline(
     else:
         summaries["updater"] = {"skipped": "budget exhausted"}
 
+    # 7. Outreach — draft + send one confirmation email per needs_review place
+    #    with phone/website on file, via Resend (test-recipient only for now —
+    #    see CLAUDE.md's Outreach agent design decisions). Runs last: nothing
+    #    follows it, so it takes whatever budget remains like the Updater.
+    out_cap = budget.allow(settings.outreach_monthly_limit)
+    if out_cap > 0 and settings.resend_api_key and settings.outreach_test_recipient and haiku:
+        resend_client = ResendClient(settings.resend_api_key)
+        outreach = OutreachAgent(
+            db,
+            haiku,
+            resend_client,
+            test_recipient=settings.outreach_test_recipient,
+            haiku_model=settings.haiku_model,
+            max_per_run=out_cap,
+        )
+        summaries["outreach"] = outreach.run()
+        budget.consume(
+            summaries["outreach"].get("drafted", 0) + summaries["outreach"].get("sent", 0)
+        )
+    else:
+        summaries["outreach"] = {"skipped": "budget exhausted or outreach not configured"}
+
     overall = {
         "dry_run": dry_run,
         "budget_total": budget.total,
@@ -287,6 +318,7 @@ def run_pipeline(
         "suggestion": summaries["suggestion"],
         "validator": summaries["validator"],
         "updater": summaries["updater"],
+        "outreach": summaries["outreach"],
     }
 
     status = _overall_status(summaries)
@@ -305,7 +337,7 @@ def run_pipeline(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the CeliacMap agent pipeline (search -> social -> web -> suggestion -> validator -> updater)."
+        description="Run the CeliacMap agent pipeline (search -> social -> web -> suggestion -> validator -> updater -> outreach)."
     )
     parser.add_argument(
         "--dry-run",
@@ -354,6 +386,7 @@ def main() -> int:
     print(f"  suggestion       : {overall['suggestion']}")
     print(f"  validator        : {overall['validator']}")
     print(f"  updater          : {overall['updater']}")
+    print(f"  outreach         : {overall['outreach']}")
 
     # Exit code reflects whether the pipeline COMPLETED, not whether every external
     # call succeeded. Reaching here means it did, so the CI job is green. The agents

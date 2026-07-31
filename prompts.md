@@ -1008,3 +1008,74 @@ Report back confirming both files were created and their line counts.
 discipline used throughout the project. Unlike ADR-001 (which documented an
 existing production decision), ADR-002 documents a decision for a feature still
 in design phase.
+
+## 20. Outreach agent — `outreach_send` stage (Phase 15)
+
+**Prompt (summary):** "Implement the `outreach_send` stage of the Outreach
+Agent, per `PLAN-outreach-agent.md` and ADR-002. Provider is Resend (sandbox
+`onboarding@resend.dev`), schema already migrated. Follow the existing agent
+conventions (`social_agent.py` / `base.py`): a `BaseAgent` subclass, draft the
+message with `claude-haiku-4-5`, respect a new `OUTREACH_MONTHLY_LIMIT`, and
+prioritize the oldest `needs_review` places with `phone` or `website` on
+file. Start with the design."
+
+**Used for:** Implementing `agents/outreach_agent.py` and
+`agents/clients/resend_client.py`, extending `SupabaseClient`
+(`fetch_needs_review_for_outreach`, `insert_outreach_message`), adding the
+**Outreach** stage to `scripts/run_agents.py` (7th, after Updater), the new
+`RESEND_API_KEY` / `OUTREACH_TEST_RECIPIENT` / `OUTREACH_MONTHLY_LIMIT`
+settings, and offline tests (`tests/test_outreach_agent.py`).
+
+**Key decisions made during this prompt:**
+- **Fixed test recipient, not per-business email:** Google Places has no email
+  field (only `phone`/`website`, confirmed while building this), and Resend's
+  sandbox sender can only deliver to the account's own verified email anyway —
+  so every send currently targets a fixed `OUTREACH_TEST_RECIPIENT`, while
+  selection/drafting/logging still operate on the real candidate.
+- **No new `'failed'` status:** a drafting or send failure leaves
+  `outreach_status` at `'not_sent'` (nothing is written), so the place is
+  naturally retried next run — mirrors how Social/Search swallow per-item
+  errors.
+- **Haiku for drafting, same rubric-plus-JSON-contract pattern as Social's
+  `PARSE_RUBRIC`:** a templated confirmation email from
+  `{name, category, city}` is a cheap, low-judgment task; no safety judgment
+  is made here (that remains the Sonnet Validator's job, for the
+  not-yet-built Etapa 2 reply re-evaluation).
+
+**Input variables** (one call per candidate place):
+- `{{place_name}}`, `{{category}}`, `{{city}}` — drawn straight from the
+  `places` row.
+
+**The exact rubric (`OUTREACH_RUBRIC` in `agents/outreach_agent.py`):**
+
+```text
+Redactás un email breve y respetuoso en nombre de CeliacMap, un proyecto
+comunitario que mapea lugares gluten free / sin TACC en Uruguay y Argentina,
+dirigido a un comercio que aparece como candidato en el mapa pero todavía no
+tiene evidencia suficiente confirmada.
+
+Se te da el nombre del comercio, su categoría y su ciudad. El email debe:
+- Presentar brevemente a CeliacMap (un mapa comunitario, no una entidad oficial).
+- Pedir amablemente que confirmen si ofrecen opciones sin TACC y, si es
+posible, que describan su protocolo de contaminación cruzada.
+- Ser breve (2-3 párrafos cortos), cordial, sin sonar a spam ni a exigencia.
+- Firmarse como "Equipo de CeliacMap".
+
+Respondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional, exactamente
+con esta forma:
+{"subject": "<asunto breve>", "body": "<cuerpo del email en texto plano>"}
+```
+
+**Worked example:**
+
+For a `needs_review` place `{"name": "Café Aroma", "category": "cafe", "city":
+"Montevideo"}`, Haiku returns:
+
+```json
+{"subject": "Confirmación sin TACC — Café Aroma",
+ "body": "Hola,\n\nSomos el equipo de CeliacMap, un mapa comunitario de lugares gluten free / sin TACC en Uruguay y Argentina. Encontramos a Café Aroma como candidato, pero todavía no tenemos evidencia suficiente confirmada.\n\n¿Podrían confirmarnos si ofrecen opciones sin TACC y, de ser posible, contarnos brevemente cómo evitan la contaminación cruzada?\n\nSaludos,\nEquipo de CeliacMap"}
+```
+
+The agent sends this via Resend (to the fixed test recipient for now),
+records it in `outreach_messages`, and flips that place's
+`outreach_status` to `'sent'`.

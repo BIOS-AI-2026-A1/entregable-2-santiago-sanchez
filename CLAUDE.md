@@ -648,6 +648,48 @@ approved rows.
   promoter inserts via the existing always-mappable `insert_place_candidate` path.
   Only `agent_log.agent` gained `'suggestion'` (idempotent widener).
 
+### Outreach agent design decisions
+
+`agents/outreach_agent.py` implements only **Etapa 1 (`outreach_send`)** of
+`docs/plans/PLAN-outreach-agent.md` — drafting and sending a confirmation
+email to businesses stuck in `needs_review`. Etapa 2
+(`outreach_reply_handler`, a webhook that re-evaluates the reply through the
+Validator) is not yet built.
+
+- **Sandbox sender means a fixed test recipient, not per-business email.**
+  Google Places Details never returns a business email address (confirmed
+  while building this agent — only `phone`/`website` exist, already
+  persisted), and separately Resend's shared sandbox sender
+  (`onboarding@resend.dev`) can only deliver to the Resend account's own
+  verified email until a custom domain is verified. Rather than block on
+  either gap, every outreach email currently goes to a fixed
+  `OUTREACH_TEST_RECIPIENT` env var — selection, drafting, budget,
+  `outreach_messages`, and `places.outreach_status` all still operate on the
+  real `needs_review` candidate; only the physical send destination is the
+  test inbox. Real per-business delivery is future work once a domain is
+  verified and a real contact-email source is added.
+- **Selection — phone or website present, oldest first, not yet contacted.**
+  `SupabaseClient.fetch_needs_review_for_outreach` filters
+  `status='needs_review'` and `outreach_status='not_sent'`, ordered oldest
+  first; the agent then keeps only rows with a `phone` or `website` on file
+  (a place with neither is unlikely to be reachable at all), in Python rather
+  than a Supabase `OR` filter string (no precedent for `.or_()` anywhere in
+  `supabase_client.py`, and `needs_review` volume has historically been small).
+- **Failure leaves the place retryable, no new status value.** If drafting
+  (Haiku) or sending (Resend) fails, nothing is written — `outreach_status`
+  stays `'not_sent'`, so the place is naturally retried on a later run. No
+  `'failed'` status was added; this mirrors how Social/Search swallow
+  per-item errors and let the next run retry.
+- **`agent_log.agent='outreach'` still needs a CHECK widening (flagged, not
+  yet applied).** Same gap noted in the Phase 14 entry below — until applied,
+  every `BaseAgent.log()` call from this agent fails to persist (caught by the
+  try/except in `agents/base.py`, so the run won't crash, but the audit trail
+  will be empty until the migration is applied).
+- **Model — `claude-haiku-4-5`**, same choice and rationale as the Social
+  agent's lead-parsing call: drafting a short templated email from
+  `{name, category, city}` is a cheap, low-judgment text task; the Validator
+  (Sonnet) still makes every safety judgment when Etapa 2 re-evaluates a reply.
+
 ### Build status (phases)
 
 - ✅ **Phase 1–2 — Landing page + editorial redesign.** Responsive bilingual
@@ -756,6 +798,44 @@ approved rows.
   +11). Design rationale: **Suggest-a-Place public form design decisions** above.
   Next verification: apply `db/schema.sql`, submit a test suggestion from the form
   (expect `201` + a `new` row), then a live pipeline run promoting it to `pending`.
+- 🚧 **Phase 14 — Outreach Agent (schema only).** `db/schema.sql` gained
+  `places.outreach_status` (`not_sent`/`sent`/`replied`/`no_response`, default
+  `not_sent`), `places.outreach_channel` (`email`/`whatsapp`, nullable), a new
+  `places.status` value `outreach_confirmed` (widened `places_status_check`,
+  additive per ADR-002 — never reached by auto-approval), and a new
+  `outreach_messages` table (full send/reply audit thread, RLS-locked like
+  `agent_log`: service_role only, no anon/authenticated access). Design
+  rationale: `docs/plans/PLAN-outreach-agent.md` and
+  `docs/architecture/ADR-002-outreach-evidence-not-autoapproval.md`. Schema-only
+  step — `agents/outreach_agent.py`, the `agent_log.agent='outreach'` CHECK
+  widening, and a `contact_email` source are still unscoped (plan's "Fase 0").
+  Not applied to the live database yet; `db/schema.sql` is the proposal,
+  applied manually in the Supabase SQL Editor per this project's established
+  migration workflow.
+- 🚧 **Phase 15 — Outreach Agent (`outreach_send` implemented).**
+  `agents/outreach_agent.py` (`OutreachAgent`) and `agents/clients/resend_client.py`
+  (thin Resend wrapper, mirrors `tavily_client.py`'s style) are code-complete
+  and wired into `scripts/run_agents.py` as the pipeline's 7th stage
+  (**search → social → web → suggestion → validator → updater → outreach**),
+  sharing the combined `AGENT_DAILY_BUDGET` via the same `budget.allow(cap)`
+  pattern as the Validator/Updater. Selects the oldest `needs_review` places
+  with `phone`/`website` on file and `outreach_status='not_sent'`, drafts a
+  confirmation email with `claude-haiku-4-5`, and sends it via Resend — to a
+  fixed `OUTREACH_TEST_RECIPIENT` for now (sandbox constraint, see **Outreach
+  agent design decisions** above). New env vars: `RESEND_API_KEY`,
+  `OUTREACH_TEST_RECIPIENT`, `OUTREACH_MONTHLY_LIMIT` (default 20). New
+  dependency: `resend>=2,<3`. Full offline suite green (144 tests, +9), plus a
+  fully-mocked `run_pipeline()` smoke test confirming the new stage threads
+  through the budget/summary/dry-run machinery correctly with zero real
+  network calls. **Still required before this is live:** apply the
+  `agent_log.agent='outreach'` CHECK-widening addendum proposed alongside
+  Phase 14 (not yet applied), and set `RESEND_API_KEY` /
+  `OUTREACH_TEST_RECIPIENT` in `.env` / GitHub Secrets. Next verification: a
+  standalone `python -m agents.outreach_agent` run against a real
+  `needs_review` row, confirming the test inbox receives the email and
+  `outreach_messages` / `places.outreach_status` update accordingly.
+  **Etapa 2 (`outreach_reply_handler`, the reply webhook) is not built** —
+  out of scope for this phase.
 
 ### GitHub Pages deploy decision
 

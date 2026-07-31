@@ -64,6 +64,12 @@ class Settings:
     # Public "Suggest a Place" form: max submissions the daily Suggestion promoter
     # geocodes + promotes per run (each costs one Google Find Place call).
     max_suggestions_per_run: int = 30
+    # Outreach agent (Etapa 1, outreach_send): sandbox sender can only deliver to
+    # this fixed test recipient until a custom domain is verified with Resend.
+    resend_api_key: str = ""
+    outreach_test_recipient: str = ""
+    # Outreach agent cap: confirmation emails sent per run (7th pipeline stage).
+    outreach_monthly_limit: int = 20
     # Combined cap on paid API calls for one full pipeline run (search +
     # validator + updater), enforced by scripts/run_agents.py.
     agent_daily_budget: int = 350
@@ -89,6 +95,9 @@ class Settings:
             max_web_cities_per_run=_int("MAX_WEB_CITIES_PER_RUN", 2),
             max_web_searches_per_city=_int("MAX_WEB_SEARCHES_PER_CITY", 8),
             max_suggestions_per_run=_int("MAX_SUGGESTIONS_PER_RUN", 30),
+            resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
+            outreach_test_recipient=os.getenv("OUTREACH_TEST_RECIPIENT", "").strip(),
+            outreach_monthly_limit=_int("OUTREACH_MONTHLY_LIMIT", 20),
             agent_daily_budget=_int("AGENT_DAILY_BUDGET", 350),
         )
 

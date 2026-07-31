@@ -64,6 +64,19 @@ class SupabaseClient:
         )
         return res.data or []
 
+    def fetch_needs_review_for_outreach(self, limit: int = 100) -> list[dict]:
+        """Oldest needs_review places not yet contacted (used by the Outreach agent)."""
+        res = (
+            self._db.table("places")
+            .select("*")
+            .eq("status", "needs_review")
+            .eq("outreach_status", "not_sent")
+            .order("created_at")
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+
     def update_place(self, place_id: str, patch: dict[str, Any]) -> None:
         """Apply an arbitrary field patch to a place (used by the Updater).
 
@@ -156,6 +169,30 @@ class SupabaseClient:
         if promoted_place_id is not None:
             patch["promoted_place_id"] = promoted_place_id
         self._db.table("suggestions").update(patch).eq("id", suggestion_id).execute()
+
+    # --- outreach_messages ---------------------------------------------
+    def insert_outreach_message(
+        self,
+        place_id: str,
+        *,
+        direction: str,
+        channel: str,
+        content: str,
+    ) -> dict | None:
+        """Record one message in the outreach send/reply thread for a place."""
+        res = (
+            self._db.table("outreach_messages")
+            .insert(
+                {
+                    "place_id": place_id,
+                    "direction": direction,
+                    "channel": channel,
+                    "content": content,
+                }
+            )
+            .execute()
+        )
+        return res.data[0] if res.data else None
 
     # --- agent_log ----------------------------------------------------
     def insert_agent_log(
