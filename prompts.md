@@ -663,3 +663,180 @@ canonical Validator `RUBRIC` (§12) as every other pending candidate.
 - **Registered in:** `CLAUDE.md` under the `## Skills` section.
 - **Format:** YAML frontmatter + Markdown (modern standard, replaces HTML-based
   skill conventions).
+
+## 17. ADR Generator — Three-Tier Rubric Decision
+
+**Name:** ADR Generator — Three-Tier Rubric Decision
+
+**Trigger:** When a major architectural decision needs to be formalized into a
+standalone ADR file for academic deliverables.
+
+**Input variables:** None — the prompt embeds the full ADR content verbatim
+(title, Estado, Contexto, Decisión, Consecuencias), derived from the three-tier
+rubric decision already documented in `CLAUDE.md`'s Decisions Log (see §12 above).
+
+**Worked example (the prompt used to generate
+`docs/architecture/ADR-001-three-tier-validation-rubric.md`):**
+
+```text
+Create docs/architecture/ADR-001-three-tier-validation-rubric.md
+with exactly this content (no changes, no additions):
+
+# ADR-001: Rubric de validación de tres niveles en lugar de binario
+
+**Estado:** Aceptado
+
+## Contexto
+El Validator Agent usa Claude (Sonnet) para juzgar si un lugar es
+efectivamente "sin TACC" a partir de evidencia en lenguaje natural
+(reseñas, redes sociales, descripciones). Al tratarse de información
+de seguridad alimentaria para personas celíacas, un falso positivo
+(aprobar un lugar que no es seguro) tiene consecuencias reales para
+la salud del usuario — no es un error cosmético. Un rubric binario
+(aprobado/rechazado) obliga al modelo a colapsar casos ambiguos
+—evidencia parcial, desactualizada, o contradictoria— hacia uno de
+los dos extremos, sin manera de señalar incertidumbre real.
+
+## Decisión
+Se implementó un rubric de tres niveles con umbrales de confianza
+explícitos:
+- `approved` (confianza ≥ 0.85)
+- `needs_review` (confianza 0.50–0.85)
+- `discarded` (confianza < 0.50)
+
+Esto requirió una migración de schema en Supabase, agregando las
+columnas `needs_review` (status), `flags` (jsonb) y `recommendation`
+(text) a la tabla `places`.
+
+## Consecuencias
+
+**Positivas:**
+- Los casos ambiguos quedan explícitamente marcados para revisión
+  humana en vez de forzarse a un sí/no.
+- El sistema nunca "sobreestima" seguridad — el default ante la duda
+  es `needs_review`, no `approved`. Esto respeta el principio
+  conservador central del proyecto: nunca afirmar que algo es seguro
+  sin evidencia suficiente.
+- Es la base técnica para una futura escalación por niveles (Sonnet
+  → Opus para los casos de menor confianza).
+
+**Negativas / trade-offs aceptados:**
+- Más complejidad de estado que un booleano simple: hay que mantener
+  una cola de `needs_review` y decidir quién la resuelve (por ahora,
+  revisión manual).
+- El pipeline es más lento de "cerrar" — no todo lugar candidato
+  termina en un estado final inmediato.
+
+Do not modify any other file.
+```
+
+**Used for:** Producing `docs/architecture/ADR-001-three-tier-validation-rubric.md`
+verbatim from content already decided and documented in prose form in `CLAUDE.md`
+(§12 in this log; **AI Toolkit** in the Decisions Log). No new decision was made —
+the prompt only reformats an existing decision into the standalone ADR format
+required by the academic deliverable, and `CLAUDE.md`'s Decisions Log was updated
+with a one-line pointer to the new file.
+
+## 18. C4 Diagram Renderer Fix — Mermaid flowchart vs C4Context
+
+**Name:** C4 Diagram Renderer Fix — Mermaid flowchart vs C4Context
+
+**Trigger:** When Mermaid's dedicated `C4Context`/`C4Container` syntax renders with
+overlapping/broken text on GitHub's native Markdown viewer, requiring a fallback
+diagram type that preserves the same C4 semantic levels (context and containers).
+
+**Input variables:** None — the prompt supplies the full replacement content of
+`docs/architecture/C4-diagrams.md` verbatim (both diagrams, in `flowchart TB` with
+subgraphs), preserving the same nodes and relationships as the original
+`C4Context`/`C4Container` version.
+
+**Worked example (the prompt used to regenerate
+`docs/architecture/C4-diagrams.md`):**
+
+```text
+Replace the full content of docs/architecture/C4-diagrams.md with
+this exact content:
+
+# Diagramas de Arquitectura C4 — CeliacMap
+
+## Nivel 1 — Contexto del sistema
+
+```mermaid
+flowchart TB
+    usuario["👤 Persona celíaca<br/><i>Busca lugares sin TACC<br/>confiables en Argentina y Uruguay</i>"]
+    colaborador["👤 Colaborador de la comunidad<br/><i>Sugiere nuevos lugares<br/>vía formulario público</i>"]
+
+    celiacmap["🗺️ <b>CeliacMap</b><br/><i>Plataforma web que identifica, valida<br/>y muestra lugares sin TACC confiables</i>"]
+
+    anthropic[["Anthropic API<br/><i>Claude Haiku (descubrimiento)<br/>y Sonnet (juicio de seguridad)</i>"]]
+    google[["Google Places API<br/><i>Búsqueda determinística<br/>de comercios</i>"]]
+    tavily[["Tavily API<br/><i>Descubrimiento de menciones<br/>en redes sociales</i>"]]
+    github_actions[["GitHub Actions<br/><i>Orquesta el pipeline<br/>de forma mensual</i>"]]
+
+    usuario -->|"Consulta el mapa<br/>HTTPS"| celiacmap
+    colaborador -->|"Sugiere un lugar<br/>HTTPS/Formulario"| celiacmap
+
+    celiacmap -->|"Valida y clasifica<br/>candidatos"| anthropic
+    celiacmap -->|"Busca comercios<br/>candidatos"| google
+    celiacmap -->|"Busca menciones<br/>sociales"| tavily
+    github_actions -->|"Ejecuta el pipeline<br/>mensualmente"| celiacmap
+
+    style celiacmap fill:#1168bd,color:#fff
+    style usuario fill:#08427b,color:#fff
+    style colaborador fill:#08427b,color:#fff
+    style anthropic fill:#999,color:#fff
+    style google fill:#999,color:#fff
+    style tavily fill:#999,color:#fff
+    style github_actions fill:#999,color:#fff
+```
+
+## Nivel 2 — Contenedores
+
+```mermaid
+flowchart TB
+    usuario["👤 Persona celíaca"]
+
+    anthropic[["Anthropic API"]]
+    google[["Google Places API"]]
+    tavily[["Tavily API"]]
+
+    subgraph celiacmap["CeliacMap [SYSTEM]"]
+        frontend["<b>Frontend estático</b><br/><i>HTML/CSS/JS + Leaflet.js</i><br/>Mapa interactivo, servido por<br/>GitHub Pages, sin build step"]
+        pipeline["<b>Pipeline de agentes</b><br/><i>Python</i><br/>Search, Social, Validator,<br/>Updater, Web y Suggestion Agents"]
+        mcp["<b>MCP Server</b><br/><i>Python/FastMCP</i><br/>Expone 6 tools para interactuar<br/>con los datos validados"]
+        db[("<b>Base de datos</b><br/><i>Supabase (PostgreSQL)</i><br/>Lugares validados, sugerencias,<br/>estado del rubric de 3 niveles")]
+    end
+
+    usuario -->|"Navega el mapa<br/>HTTPS"| frontend
+    usuario -->|"Envía sugerencia<br/>Formulario"| frontend
+    frontend -->|"Lee/escribe<br/>REST"| db
+
+    pipeline -->|"Lee/escribe lugares<br/>y estado, REST"| db
+    pipeline -->|"Descubre (Haiku) y<br/>valida (Sonnet), API"| anthropic
+    pipeline -->|"Busca candidatos<br/>API"| google
+    pipeline -->|"Busca menciones<br/>sociales, API"| tavily
+
+    mcp -->|"Consulta datos<br/>validados, REST"| db
+
+    style frontend fill:#1168bd,color:#fff
+    style pipeline fill:#1168bd,color:#fff
+    style mcp fill:#1168bd,color:#fff
+    style db fill:#1168bd,color:#fff
+    style usuario fill:#08427b,color:#fff
+    style anthropic fill:#999,color:#fff
+    style google fill:#999,color:#fff
+    style tavily fill:#999,color:#fff
+```
+
+Do not modify any other file.
+```
+
+**Used for:** Fixing rendering of `docs/architecture/C4-diagrams.md` on GitHub's
+native Markdown viewer. The original diagrams used Mermaid's `C4Context` and
+`C4Container` grammar (§ prior version), which GitHub's Mermaid renderer displays
+with overlapping/broken text. Replaced with plain `flowchart TB` + `subgraph`,
+which every Mermaid renderer supports reliably, while keeping the same two C4
+levels (Nivel 1 — Contexto del sistema, Nivel 2 — Contenedores), the same actors,
+systems, external systems, and relationships — only the diagram grammar changed,
+not the architectural content. `CLAUDE.md`'s Decisions Log was updated with a
+one-line pointer explaining the renderer trade-off.

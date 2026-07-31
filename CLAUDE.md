@@ -778,3 +778,12 @@ approved rows.
 - **Triggers.** Deploys on push to `main` limited to frontend paths (so backend-only
   commits don't redeploy), plus manual `workflow_dispatch`. A `pages` concurrency
   group serializes deploys.
+
+- Three-tier validation rubric: see
+  docs/architecture/ADR-001-three-tier-validation-rubric.md
+- C4 diagrams in Mermaid `flowchart` instead of `C4Context`/
+  `C4Container`: GitHub's native renderer shows overlapping text
+  with the dedicated C4 syntax; `flowchart` with subgraphs
+  preserves the same semantic levels (context and containers) and
+  renders reliably with no additional installation required. See
+  docs/architecture/C4-diagrams.md.
