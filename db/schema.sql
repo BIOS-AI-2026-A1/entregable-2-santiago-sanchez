@@ -109,6 +109,23 @@ end $$;
 alter table public.places add column if not exists flags jsonb;
 alter table public.places add column if not exists recommendation text;
 
+-- Rich Place Details fields the Search agent already fetches per candidate
+-- (agents/clients/google_places.py DEFAULT_DETAIL_FIELDS: formatted_phone_number,
+-- website, opening_hours, rating, user_ratings_total) and has attempted to
+-- persist since _apply_place_details shipped — until now every one of these
+-- five writes failed at the DB/PostgREST layer (no matching column) and was
+-- silently caught + logged by the try/except in search_agent.py:95-100, so
+-- the API cost was already being paid with the data discarded. Same root
+-- cause for all five; added together, idempotently, for databases created
+-- before these columns existed.
+alter table public.places add column if not exists phone              text;
+alter table public.places add column if not exists website            text;
+-- opening_hours stores only weekday_text (a JSON array of strings), the same
+-- shape as `flags` above — not Google's full nested opening_hours object.
+alter table public.places add column if not exists opening_hours      jsonb;
+alter table public.places add column if not exists rating             numeric;
+alter table public.places add column if not exists user_ratings_total integer;
+
 -- ---------------------------------------------------------------------
 -- Table: reviews
 -- ---------------------------------------------------------------------

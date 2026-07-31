@@ -787,3 +787,6 @@ approved rows.
   preserves the same semantic levels (context and containers) and
   renders reliably with no additional installation required. See
   docs/architecture/C4-diagrams.md.
+- Outreach Agent: respuesta del comercio como evidencia adicional,
+  no aprobación automática — ver
+  docs/architecture/ADR-002-outreach-evidence-not-autoapproval.md
