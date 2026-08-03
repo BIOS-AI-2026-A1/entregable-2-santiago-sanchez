@@ -299,7 +299,8 @@ Target (functional product — see **## Architecture**):
 │   ├── web_agent.py
 │   ├── validator_agent.py
 │   ├── updater_agent.py
-│   └── clients/{supabase_client,google_places,tavily_client,llm}.py
+│   └── clients/{supabase_client,google_places,tavily_client,llm,
+│       resend_client,website_scraper}.py
 ├── mcp_server/                 # AI toolkit — MCP server
 │   ├── server.py               # 6 tools over Supabase + the Validator rubric
 │   └── README.md
@@ -680,15 +681,35 @@ Validator) is not yet built.
   stays `'not_sent'`, so the place is naturally retried on a later run. No
   `'failed'` status was added; this mirrors how Social/Search swallow
   per-item errors and let the next run retry.
-- **`agent_log.agent='outreach'` still needs a CHECK widening (flagged, not
-  yet applied).** Same gap noted in the Phase 14 entry below — until applied,
-  every `BaseAgent.log()` call from this agent fails to persist (caught by the
-  try/except in `agents/base.py`, so the run won't crash, but the audit trail
-  will be empty until the migration is applied).
+- **`agent_log.agent='outreach'` CHECK widening — applied and verified.**
+  Was flagged here as a pending gap; closed in a later session (see the
+  Phase 15 entry below) — `agent_log` now shows `agent='outreach'` rows.
 - **Model — `claude-haiku-4-5`**, same choice and rationale as the Social
   agent's lead-parsing call: drafting a short templated email from
   `{name, category, city}` is a cheap, low-judgment text task; the Validator
   (Sonnet) still makes every safety judgment when Etapa 2 re-evaluates a reply.
+- **`contact_email` discovery — deterministic website scrape, not another LLM
+  call.** `agents/clients/website_scraper.py` (`WebsiteScraperClient`) fetches
+  a candidate's own (non-social) website home page with a 5s timeout and
+  looks for a `mailto:` link, falling back to a generic email regex over the
+  visible text — zero AI calls, zero API cost. It deliberately never raises
+  (unlike `TavilySearchClient.search` / `ResendClient.send`, which raise and
+  let the calling agent's per-item `try/except` handle it): this is a pure
+  enrichment step, so a dead site, timeout, or bad cert must degrade to "no
+  email found," not abort the run. Filters out `facebook.com` /
+  `instagram.com` / `wa.me` / `whatsapp.com` / `beacons.ai` / `linktr.ee`
+  links before attempting anything — confirmed against real data that 40 of
+  the 68 `needs_review` places with a website on file are exactly these
+  profile pages, not a business's own site. `OutreachAgent._scrape_missing_emails`
+  runs before `_select_candidates`, persists `places.contact_email` (or
+  `null`) and always stamps `contact_email_checked_at` so the same site isn't
+  re-scraped every run, and is capped by a new `max_email_scrapes_per_run`
+  setting (default 30, env `MAX_EMAIL_SCRAPES_PER_RUN`) mirroring every other
+  agent's per-run limit — the Web agent's lack of one already caused a real CI
+  timeout (Phase 11), and each scrape can legitimately take up to 5s. The
+  scraped email isn't consumed by the send step yet (still sandbox-only, per
+  the first bullet above); it's stored for when a verified sending domain
+  makes real per-business delivery possible.
 
 ### Build status (phases)
 
@@ -838,6 +859,31 @@ Validator) is not yet built.
   `outreach_messages` / `places.outreach_status` update accordingly.
   **Etapa 2 (`outreach_reply_handler`, the reply webhook) is not built** —
   out of scope for this phase.
+- 🚧 **Phase 16 — Outreach Agent (`contact_email` website scraper).**
+  `agents/clients/website_scraper.py` (`WebsiteScraperClient`) is a
+  deterministic, zero-API-cost scraper that fetches a candidate's own
+  (non-social) website home page and looks for a `mailto:` link or a visible
+  email address, filtering out `facebook.com` / `instagram.com` / `wa.me` /
+  `whatsapp.com` / `beacons.ai` / `linktr.ee` first (confirmed live: 40 of
+  the 68 `needs_review` places with a website on file are exactly these
+  profile pages). `OutreachAgent._scrape_missing_emails` runs as the first
+  step of `run()`, before `_select_candidates`, for eligible places
+  (non-social website, `contact_email_checked_at` still null), persists
+  `places.contact_email` (or `null`) and always stamps
+  `contact_email_checked_at`, and is capped by a new
+  `max_email_scrapes_per_run` setting (default 30, env
+  `MAX_EMAIL_SCRAPES_PER_RUN`) — see **Outreach agent design decisions**
+  above for the full rationale. New dependency: `requests>=2.34,<3` (was
+  already a transitive dependency; now pinned directly since CeliacMap's own
+  code imports it). Full offline suite green (169 tests, +25), including the
+  repo's first transport-level HTTP mock (`tests/test_website_scraper.py`).
+  `places.contact_email` / `contact_email_checked_at` were added to
+  `db/schema.sql` in a prior session; whether that migration has been
+  applied to the live database is the remaining gate before this can run for
+  real. Next verification: apply the migration if not already live, then a
+  standalone `python -m agents.outreach_agent` run confirming `contact_email`
+  / `contact_email_checked_at` populate for real `needs_review` places and
+  aren't re-scraped on a second run.
 
 ### GitHub Pages deploy decision
 

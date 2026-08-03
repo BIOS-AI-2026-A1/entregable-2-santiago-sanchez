@@ -70,6 +70,10 @@ class Settings:
     outreach_test_recipient: str = ""
     # Outreach agent cap: confirmation emails sent per run (7th pipeline stage).
     outreach_monthly_limit: int = 20
+    # Outreach agent's contact_email scraper: websites scraped per run. Mirrors
+    # every other agent's per-run cap, bounding worst-case latency (each site
+    # gets a synchronous 5s-timeout GET) as the eligible pool grows.
+    max_email_scrapes_per_run: int = 30
     # Combined cap on paid API calls for one full pipeline run (search +
     # validator + updater), enforced by scripts/run_agents.py.
     agent_daily_budget: int = 350
@@ -98,6 +102,7 @@ class Settings:
             resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
             outreach_test_recipient=os.getenv("OUTREACH_TEST_RECIPIENT", "").strip(),
             outreach_monthly_limit=_int("OUTREACH_MONTHLY_LIMIT", 20),
+            max_email_scrapes_per_run=_int("MAX_EMAIL_SCRAPES_PER_RUN", 30),
             agent_daily_budget=_int("AGENT_DAILY_BUDGET", 350),
         )
 

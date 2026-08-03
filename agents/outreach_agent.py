@@ -8,6 +8,12 @@ agent never approves anything itself — it only gathers a new piece of
 evidence (the business's reply, handled by a separate, not-yet-built
 ``outreach_reply_handler``) for the Validator to re-weigh later.
 
+Before selecting candidates, ``_scrape_missing_emails`` best-effort scrapes
+each not-yet-checked place's own (non-social) website for a contact email via
+``WebsiteScraperClient`` and persists ``places.contact_email`` /
+``contact_email_checked_at`` — a real contact-email source for future use,
+since every send below still goes to the fixed sandbox recipient regardless.
+
 Approach, per candidate:
 
 1. Select the oldest ``needs_review`` places that still have
@@ -31,11 +37,13 @@ Every outcome and a final run summary are written to ``agent_log``.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from agents.base import BaseAgent
 from agents.clients.llm import LLMClient
 from agents.clients.resend_client import ResendClient
 from agents.clients.supabase_client import SupabaseClient
+from agents.clients.website_scraper import WebsiteScraperClient, is_social_url
 
 logger = logging.getLogger("celiacmap.agent")
 
@@ -72,17 +80,60 @@ class OutreachAgent(BaseAgent):
         db: SupabaseClient,
         llm: LLMClient,
         resend_client: ResendClient,
+        scraper: WebsiteScraperClient,
         *,
         test_recipient: str,
         haiku_model: str | None = None,
         max_per_run: int = 20,
+        max_scrapes_per_run: int = 30,
     ):
         super().__init__(db)
         self.llm = llm
         self.resend = resend_client
+        self.scraper = scraper
         self.test_recipient = test_recipient
         self.haiku_model = haiku_model
         self.max_per_run = max_per_run
+        self.max_scrapes_per_run = max_scrapes_per_run
+
+    def _scrape_missing_emails(self) -> dict:
+        """Best-effort contact_email discovery for eligible needs_review places.
+
+        Eligible: a non-social website on file and never scraped before
+        (contact_email_checked_at is null). Runs once per place regardless of
+        outcome — contact_email_checked_at is always stamped so the same site
+        isn't re-scraped every run.
+        """
+        candidates = self.db.fetch_needs_review_for_outreach(CANDIDATE_FETCH_LIMIT)
+        eligible = [
+            p
+            for p in candidates
+            if p.get("website")
+            and not is_social_url(p["website"])
+            and p.get("contact_email_checked_at") is None
+        ][: self.max_scrapes_per_run]
+
+        scraped = found = 0
+        for place in eligible:
+            place_id = place.get("id")
+            email = self.scraper.find_email(place["website"])
+            scraped += 1
+            found += bool(email)
+            try:
+                self.db.update_place(
+                    place_id,
+                    {
+                        "contact_email": email,
+                        "contact_email_checked_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception:  # noqa: BLE001 - persistence failure must not abort the run
+                logger.exception("failed to persist scraped email for %s", place_id)
+                continue
+
+        summary = {"scraped": scraped, "found": found}
+        self.log("contact_email_scrape_complete", summary, status="success")
+        return summary
 
     def _select_candidates(self) -> list[dict]:
         candidates = self.db.fetch_needs_review_for_outreach(CANDIDATE_FETCH_LIMIT)
@@ -111,6 +162,7 @@ class OutreachAgent(BaseAgent):
         return {"subject": subject, "body": body}
 
     def run(self) -> dict:
+        self._scrape_missing_emails()
         candidates = self._select_candidates()
 
         candidates_seen = len(candidates)
@@ -211,13 +263,16 @@ def main() -> int:
     db = SupabaseClient(settings.supabase_url, settings.supabase_service_role_key)
     llm = LLMClient(settings.anthropic_api_key, settings.haiku_model)
     resend_client = ResendClient(settings.resend_api_key)
+    scraper = WebsiteScraperClient()
     agent = OutreachAgent(
         db,
         llm,
         resend_client,
+        scraper,
         test_recipient=settings.outreach_test_recipient,
         haiku_model=settings.haiku_model,
         max_per_run=settings.outreach_monthly_limit,
+        max_scrapes_per_run=settings.max_email_scrapes_per_run,
     )
 
     summary = agent.run()

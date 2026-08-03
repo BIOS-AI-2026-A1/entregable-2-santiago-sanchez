@@ -31,6 +31,7 @@ from agents.clients.llm import LLMClient
 from agents.clients.resend_client import ResendClient
 from agents.clients.supabase_client import SupabaseClient
 from agents.clients.tavily_client import TavilySearchClient
+from agents.clients.website_scraper import WebsiteScraperClient
 from agents.outreach_agent import OutreachAgent
 from agents.search_agent import SearchAgent
 from agents.social_agent import SocialAgent
@@ -292,13 +293,16 @@ def run_pipeline(
     out_cap = budget.allow(settings.outreach_monthly_limit)
     if out_cap > 0 and settings.resend_api_key and settings.outreach_test_recipient and haiku:
         resend_client = ResendClient(settings.resend_api_key)
+        scraper = WebsiteScraperClient()
         outreach = OutreachAgent(
             db,
             haiku,
             resend_client,
+            scraper,
             test_recipient=settings.outreach_test_recipient,
             haiku_model=settings.haiku_model,
             max_per_run=out_cap,
+            max_scrapes_per_run=settings.max_email_scrapes_per_run,
         )
         summaries["outreach"] = outreach.run()
         budget.consume(

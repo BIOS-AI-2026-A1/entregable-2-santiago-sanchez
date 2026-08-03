@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from agents.outreach_agent import OutreachAgent
 
@@ -14,6 +14,7 @@ def make_place(
     city="Montevideo",
     phone="099123456",
     website=None,
+    contact_email_checked_at=None,
 ):
     return {
         "id": id,
@@ -22,10 +23,11 @@ def make_place(
         "city": city,
         "phone": phone,
         "website": website,
+        "contact_email_checked_at": contact_email_checked_at,
     }
 
 
-def make_agent(max_per_run=20, test_recipient="dev@example.com"):
+def make_agent(max_per_run=20, max_scrapes_per_run=30, test_recipient="dev@example.com"):
     db = MagicMock()
     db.fetch_needs_review_for_outreach.return_value = [make_place()]
     db.insert_outreach_message.return_value = {"id": "msg-1"}
@@ -36,21 +38,25 @@ def make_agent(max_per_run=20, test_recipient="dev@example.com"):
     }
     resend_client = MagicMock()
     resend_client.send.return_value = "email-1"
+    scraper = MagicMock()
+    scraper.find_email.return_value = None
     agent = OutreachAgent(
         db,
         llm,
         resend_client,
+        scraper,
         test_recipient=test_recipient,
         max_per_run=max_per_run,
+        max_scrapes_per_run=max_scrapes_per_run,
     )
-    return agent, db, llm, resend_client
+    return agent, db, llm, resend_client, scraper
 
 
 # --- Selection filter -------------------------------------------------------
 
 
 def test_select_candidates_keeps_phone_or_website():
-    agent, db, _, _ = make_agent()
+    agent, db, _, _, _ = make_agent()
     db.fetch_needs_review_for_outreach.return_value = [
         make_place(id="p1", phone="099", website=None),
         make_place(id="p2", phone=None, website="https://x.com"),
@@ -61,7 +67,7 @@ def test_select_candidates_keeps_phone_or_website():
 
 
 def test_select_candidates_respects_cap():
-    agent, db, _, _ = make_agent(max_per_run=1)
+    agent, db, _, _, _ = make_agent(max_per_run=1)
     db.fetch_needs_review_for_outreach.return_value = [
         make_place(id="p1"),
         make_place(id="p2"),
@@ -74,13 +80,13 @@ def test_select_candidates_respects_cap():
 
 
 def test_draft_returns_none_on_llm_error():
-    agent, _, llm, _ = make_agent()
+    agent, _, llm, _, _ = make_agent()
     llm.complete_json.side_effect = RuntimeError("boom")
     assert agent._draft(make_place()) is None
 
 
 def test_draft_returns_none_on_empty_subject_or_body():
-    agent, _, llm, _ = make_agent()
+    agent, _, llm, _, _ = make_agent()
     llm.complete_json.return_value = {"subject": "", "body": "algo"}
     assert agent._draft(make_place()) is None
     llm.complete_json.return_value = {"subject": "algo", "body": ""}
@@ -91,7 +97,7 @@ def test_draft_returns_none_on_empty_subject_or_body():
 
 
 def test_successful_draft_and_send():
-    agent, db, llm, resend_client = make_agent()
+    agent, db, llm, resend_client, _ = make_agent()
 
     summary = agent.run()
 
@@ -120,7 +126,7 @@ def test_successful_draft_and_send():
 
 
 def test_candidate_without_contact_is_skipped():
-    agent, db, llm, resend_client = make_agent()
+    agent, db, llm, resend_client, _ = make_agent()
     db.fetch_needs_review_for_outreach.return_value = [
         make_place(phone=None, website=None)
     ]
@@ -134,7 +140,7 @@ def test_candidate_without_contact_is_skipped():
 
 
 def test_draft_failure_is_counted_and_no_send_attempted():
-    agent, db, llm, resend_client = make_agent()
+    agent, db, llm, resend_client, _ = make_agent()
     llm.complete_json.side_effect = RuntimeError("boom")
 
     summary = agent.run()
@@ -147,7 +153,7 @@ def test_draft_failure_is_counted_and_no_send_attempted():
 
 
 def test_send_failure_leaves_no_db_writes():
-    agent, db, llm, resend_client = make_agent()
+    agent, db, llm, resend_client, _ = make_agent()
     resend_client.send.side_effect = RuntimeError("resend down")
 
     summary = agent.run()
@@ -163,7 +169,7 @@ def test_send_failure_leaves_no_db_writes():
 
 
 def test_zero_cap_does_nothing():
-    agent, db, llm, resend_client = make_agent(max_per_run=0)
+    agent, db, llm, resend_client, _ = make_agent(max_per_run=0)
 
     summary = agent.run()
 
@@ -175,3 +181,108 @@ def test_zero_cap_does_nothing():
     }
     llm.complete_json.assert_not_called()
     resend_client.send.assert_not_called()
+
+
+# --- Contact email scraping -----------------------------------------------------
+
+
+def test_scrape_skips_places_without_website():
+    agent, db, _, _, scraper = make_agent()
+    db.fetch_needs_review_for_outreach.return_value = [make_place(website=None)]
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary == {"scraped": 0, "found": 0}
+    scraper.find_email.assert_not_called()
+    db.update_place.assert_not_called()
+
+
+def test_scrape_skips_social_websites():
+    agent, db, _, _, scraper = make_agent()
+    db.fetch_needs_review_for_outreach.return_value = [
+        make_place(website="https://www.instagram.com/cafex")
+    ]
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary == {"scraped": 0, "found": 0}
+    scraper.find_email.assert_not_called()
+    db.update_place.assert_not_called()
+
+
+def test_scrape_skips_already_checked_places():
+    agent, db, _, _, scraper = make_agent()
+    db.fetch_needs_review_for_outreach.return_value = [
+        make_place(
+            website="https://cafex.com",
+            contact_email_checked_at="2026-08-01T00:00:00+00:00",
+        )
+    ]
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary == {"scraped": 0, "found": 0}
+    scraper.find_email.assert_not_called()
+    db.update_place.assert_not_called()
+
+
+def test_scrape_persists_found_email_and_checked_at():
+    agent, db, _, _, scraper = make_agent()
+    db.fetch_needs_review_for_outreach.return_value = [
+        make_place(id="p1", website="https://cafex.com")
+    ]
+    scraper.find_email.return_value = "hola@cafex.com"
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary == {"scraped": 1, "found": 1}
+    scraper.find_email.assert_called_once_with("https://cafex.com")
+    db.update_place.assert_called_once()
+    call = db.update_place.call_args
+    assert call.args[0] == "p1"
+    assert call.args[1]["contact_email"] == "hola@cafex.com"
+    assert call.args[1]["contact_email_checked_at"] is not None
+
+
+def test_scrape_persists_null_email_and_checked_at_when_not_found():
+    agent, db, _, _, scraper = make_agent()
+    db.fetch_needs_review_for_outreach.return_value = [
+        make_place(id="p1", website="https://cafex.com")
+    ]
+    scraper.find_email.return_value = None
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary == {"scraped": 1, "found": 0}
+    db.update_place.assert_called_once()
+    call = db.update_place.call_args
+    assert call.args[1]["contact_email"] is None
+    assert call.args[1]["contact_email_checked_at"] is not None
+
+
+def test_scrape_respects_max_scrapes_per_run_cap():
+    agent, db, _, _, scraper = make_agent(max_scrapes_per_run=1)
+    db.fetch_needs_review_for_outreach.return_value = [
+        make_place(id="p1", website="https://a.com"),
+        make_place(id="p2", website="https://b.com"),
+    ]
+
+    summary = agent._scrape_missing_emails()
+
+    assert summary["scraped"] == 1
+    scraper.find_email.assert_called_once()
+
+
+def test_run_scrapes_before_selecting_candidates():
+    agent, db, llm, resend_client, scraper = make_agent()
+    order = []
+    with patch.object(
+        agent,
+        "_scrape_missing_emails",
+        side_effect=lambda: order.append("scrape") or {"scraped": 0, "found": 0},
+    ), patch.object(
+        agent, "_select_candidates", side_effect=lambda: order.append("select") or []
+    ):
+        agent.run()
+
+    assert order == ["scrape", "select"]

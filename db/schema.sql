@@ -166,6 +166,17 @@ create table if not exists public.outreach_messages (
 
 create index if not exists outreach_messages_place_id_idx on public.outreach_messages (place_id);
 
+-- Outreach Agent (contact_email discovery): Google Places never exposes a
+-- business email (see the sandbox-recipient constraint in the Outreach agent
+-- design decisions above), so contact_email is populated separately by
+-- scraping the place's own website (already stored in places.website) when
+-- one is on file. contact_email_checked_at records the last scrape attempt
+-- — found or not — so the same website isn't re-scraped every pipeline run.
+-- Both nullable: not every place has a website, and not every website yields
+-- an email.
+alter table public.places add column if not exists contact_email text;
+alter table public.places add column if not exists contact_email_checked_at timestamptz;
+
 -- ---------------------------------------------------------------------
 -- Table: reviews
 -- ---------------------------------------------------------------------
