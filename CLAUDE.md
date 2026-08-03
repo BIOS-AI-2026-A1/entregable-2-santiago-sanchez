@@ -827,9 +827,11 @@ Validator) is not yet built.
   dependency: `resend>=2,<3`. Full offline suite green (144 tests, +9), plus a
   fully-mocked `run_pipeline()` smoke test confirming the new stage threads
   through the budget/summary/dry-run machinery correctly with zero real
-  network calls. **Still required before this is live:** apply the
-  `agent_log.agent='outreach'` CHECK-widening addendum proposed alongside
-  Phase 14 (not yet applied), and set `RESEND_API_KEY` /
+  network calls. The `agent_log.agent='outreach'` CHECK-widening addendum
+  proposed alongside Phase 14 has been applied and verified live — a
+  Supabase query confirms `agent_log` rows with `agent='outreach'`,
+  `status='success'` (actions `outreach_sent`, `outreach_run_complete`).
+  **Still required before this is live:** set `RESEND_API_KEY` /
   `OUTREACH_TEST_RECIPIENT` in `.env` / GitHub Secrets. Next verification: a
   standalone `python -m agents.outreach_agent` run against a real
   `needs_review` row, confirming the test inbox receives the email and

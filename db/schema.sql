@@ -221,6 +221,21 @@ begin
     check (agent in ('search', 'validator', 'updater', 'social', 'web', 'pipeline', 'suggestion'));
 end $$;
 
+-- Outreach Agent (agents/outreach_agent.py, Phase 15): let the outreach send
+-- stage log to agent_log like every other agent. Until this widening is
+-- applied, every BaseAgent.log() call from agent='outreach' fails silently
+-- (caught by the try/except in agents/base.py), so the pipeline runs without
+-- error but the audit trail stays empty. On an already-created table the
+-- inline check above is a no-op, so widen it in place.
+do $$
+begin
+  alter table public.agent_log drop constraint if exists agent_log_agent_check;
+  alter table public.agent_log
+    add constraint agent_log_agent_check
+    check (agent in
+      ('search', 'validator', 'updater', 'social', 'web', 'pipeline', 'suggestion', 'outreach'));
+end $$;
+
 -- ---------------------------------------------------------------------
 -- Table: suggestions  (public "Suggest a Place" form intake)
 -- ---------------------------------------------------------------------
