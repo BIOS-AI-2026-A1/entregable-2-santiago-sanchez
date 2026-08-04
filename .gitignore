@@ -13,8 +13,12 @@ desktop.ini
 *.log
 npm-debug.log*
 
-# Node (in case tooling is added later)
+# Node (Supabase CLI devDependency)
 node_modules/
+
+# Supabase CLI local state (machine-specific: project-ref, pooler-url, etc.)
+supabase/.temp/
+supabase/.branches/
 
 # Env
 .env

@@ -986,8 +986,8 @@ Supabase Edge Function, the webhook receiver), `.github/workflows/outreach-reply
   standalone `python -m agents.outreach_agent` run confirming `contact_email`
   / `contact_email_checked_at` populate for real `needs_review` places and
   aren't re-scraped on a second run.
-- 🚧 **Phase 17 — Outreach Agent Etapa 2 (reply webhook, design + code
-  complete, not yet deployed).** `supabase/functions/outreach-reply/index.ts`
+- ✅ **Phase 17 — Outreach Agent Etapa 2 (reply webhook, verified live end
+  to end).** `supabase/functions/outreach-reply/index.ts`
   (this repo's first Edge Function), `.github/workflows/outreach-reply.yml`,
   and `agents/outreach_reply_handler.py` implement the full reply flow —
   webhook receipt → Python re-evaluation reusing `RUBRIC` /
@@ -1012,16 +1012,27 @@ Supabase Edge Function, the webhook receiver), `.github/workflows/outreach-reply
   handler was starting a live HTTP server as an import side-effect merely by
   importing the file for its pure `extractPlaceId` helper. `deno check`
   passes clean on both `index.ts` and `index.test.ts`; `deno test` passes
-  6/6. **Not yet live:** apply the two schema additions;
-  `supabase functions deploy outreach-reply`; set the 3 Edge Function
-  secrets (`RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`,
-  `GITHUB_DISPATCH_TOKEN`); configure the Resend `email.received` webhook
-  pointing at the deployed function URL; set `OUTREACH_INBOUND_DOMAIN`.
-  Next verification: send one real Etapa 1 email, reply to it from an
-  external inbox, and confirm the full chain (Edge Function 200 →
-  `outreach_messages` row → GitHub Actions run → `places.status` update)
-  end to end; then a duplicate-reply / redelivered-webhook test to confirm
-  the idempotency guard holds.
+  6/6.
+
+  **Verified live with real data.** The Edge Function is deployed and
+  working (Resend shows a `200 OK` / Success delivery). A full cycle was
+  confirmed end to end: `outreach_send` → a real business-style reply →
+  Resend's `email.received` webhook → the Edge Function (signature
+  verified, reply persisted, `outreach_status` flipped) →
+  `repository_dispatch` → `agents/outreach_reply_handler.py` →
+  re-evaluation through the unmodified `RUBRIC` → result: `needs_review`
+  maintained at confidence `0.72` — correctly held below the `0.85`
+  auto-confirm threshold, since the reply was an uncorroborated business
+  self-report with no external evidence. ADR-002 behaving exactly as
+  designed: the reply strengthened the evidence but did not fast-track
+  approval.
+
+  **Operational note — Edge Function JWT verification.** The dashboard's
+  "Verify JWT with legacy secret" toggle must stay **OFF** for this
+  function (Resend's webhook calls have no Supabase auth JWT). The
+  Supabase CLI's `--no-verify-jwt` deploy flag did not apply reliably (a
+  known Supabase CLI issue) — resolved by disabling the toggle manually in
+  the Supabase dashboard instead of via deploy flags.
 
 ### GitHub Pages deploy decision
 
