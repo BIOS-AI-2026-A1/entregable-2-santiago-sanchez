@@ -166,6 +166,26 @@ create table if not exists public.outreach_messages (
 
 create index if not exists outreach_messages_place_id_idx on public.outreach_messages (place_id);
 
+-- Outreach Agent Etapa 2 (reply webhook, supabase/functions/outreach-reply/):
+-- stores Resend's email_id for a received reply so a redelivered webhook
+-- (Resend retries on any non-2xx response) doesn't insert the same reply
+-- twice. A FULL (non-partial) unique constraint, same reasoning as
+-- places_source_external_id_key above: PostgREST/supabase-py's ON CONFLICT
+-- can't infer a partial index. Sent messages keep external_id null (NULLs
+-- are distinct in a multi-column unique key, so this doesn't dedup sends).
+alter table public.outreach_messages add column if not exists external_id text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'outreach_messages_place_id_external_id_key'
+  ) then
+    alter table public.outreach_messages
+      add constraint outreach_messages_place_id_external_id_key
+      unique (place_id, external_id);
+  end if;
+end $$;
+
 -- Outreach Agent (contact_email discovery): Google Places never exposes a
 -- business email (see the sandbox-recipient constraint in the Outreach agent
 -- design decisions above), so contact_email is populated separately by
@@ -245,6 +265,21 @@ begin
     add constraint agent_log_agent_check
     check (agent in
       ('search', 'validator', 'updater', 'social', 'web', 'pipeline', 'suggestion', 'outreach'));
+end $$;
+
+-- Outreach Agent Etapa 2 (agents/outreach_reply_handler.py): let the reply
+-- handler — triggered by a GitHub repository_dispatch event fired from the
+-- Supabase Edge Function, never the monthly cron — log to agent_log like
+-- every other agent. Same silent-failure-until-applied gap as the
+-- 'outreach' widening above.
+do $$
+begin
+  alter table public.agent_log drop constraint if exists agent_log_agent_check;
+  alter table public.agent_log
+    add constraint agent_log_agent_check
+    check (agent in
+      ('search', 'validator', 'updater', 'social', 'web', 'pipeline', 'suggestion',
+       'outreach', 'outreach_reply'));
 end $$;
 
 -- ---------------------------------------------------------------------

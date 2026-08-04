@@ -27,7 +27,12 @@ def make_place(
     }
 
 
-def make_agent(max_per_run=20, max_scrapes_per_run=30, test_recipient="dev@example.com"):
+def make_agent(
+    max_per_run=20,
+    max_scrapes_per_run=30,
+    test_recipient="dev@example.com",
+    inbound_domain="",
+):
     db = MagicMock()
     db.fetch_needs_review_for_outreach.return_value = [make_place()]
     db.insert_outreach_message.return_value = {"id": "msg-1"}
@@ -48,6 +53,7 @@ def make_agent(max_per_run=20, max_scrapes_per_run=30, test_recipient="dev@examp
         test_recipient=test_recipient,
         max_per_run=max_per_run,
         max_scrapes_per_run=max_scrapes_per_run,
+        inbound_domain=inbound_domain,
     )
     return agent, db, llm, resend_client, scraper
 
@@ -110,6 +116,7 @@ def test_successful_draft_and_send():
         to="dev@example.com",
         subject="Confirmacion sin TACC - Cafe X",
         text="Hola, somos el equipo de CeliacMap...",
+        reply_to=None,
     )
     db.insert_outreach_message.assert_called_once()
     call = db.insert_outreach_message.call_args
@@ -286,3 +293,23 @@ def test_run_scrapes_before_selecting_candidates():
         agent.run()
 
     assert order == ["scrape", "select"]
+
+
+# --- Reply-to (Outreach Etapa 2) -------------------------------------------------
+
+
+def test_reply_to_omitted_when_inbound_domain_not_set():
+    agent, db, llm, resend_client, _ = make_agent(inbound_domain="")
+
+    agent.run()
+
+    assert resend_client.send.call_args.kwargs["reply_to"] is None
+
+
+def test_reply_to_built_from_place_id_when_inbound_domain_set():
+    agent, db, llm, resend_client, _ = make_agent(inbound_domain="abc123.resend.app")
+    db.fetch_needs_review_for_outreach.return_value = [make_place(id="place-42")]
+
+    agent.run()
+
+    assert resend_client.send.call_args.kwargs["reply_to"] == "outreach+place-42@abc123.resend.app"

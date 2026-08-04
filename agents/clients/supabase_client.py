@@ -64,6 +64,16 @@ class SupabaseClient:
         )
         return res.data or []
 
+    def fetch_place_by_id(self, place_id: str) -> dict | None:
+        res = (
+            self._db.table("places")
+            .select("*")
+            .eq("id", place_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
     def fetch_needs_review_for_outreach(self, limit: int = 100) -> list[dict]:
         """Oldest needs_review places not yet contacted (used by the Outreach agent)."""
         res = (
@@ -190,6 +200,19 @@ class SupabaseClient:
                     "content": content,
                 }
             )
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
+    def fetch_latest_received_message(self, place_id: str) -> dict | None:
+        """Most recent business reply on file for a place (Outreach Etapa 2)."""
+        res = (
+            self._db.table("outreach_messages")
+            .select("*")
+            .eq("place_id", place_id)
+            .eq("direction", "received")
+            .order("created_at", desc=True)
+            .limit(1)
             .execute()
         )
         return res.data[0] if res.data else None

@@ -68,6 +68,11 @@ class Settings:
     # this fixed test recipient until a custom domain is verified with Resend.
     resend_api_key: str = ""
     outreach_test_recipient: str = ""
+    # Outreach Etapa 2 (reply webhook): the account's <id>.resend.app inbound
+    # receiving domain, used to build a unique outreach+<place_id>@<domain>
+    # Reply-To per send so a business's reply can be matched back to its
+    # place. Empty means no Reply-To header is set (degrades gracefully).
+    outreach_inbound_domain: str = ""
     # Outreach agent cap: confirmation emails sent per run (7th pipeline stage).
     outreach_monthly_limit: int = 20
     # Outreach agent's contact_email scraper: websites scraped per run. Mirrors
@@ -101,6 +106,7 @@ class Settings:
             max_suggestions_per_run=_int("MAX_SUGGESTIONS_PER_RUN", 30),
             resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
             outreach_test_recipient=os.getenv("OUTREACH_TEST_RECIPIENT", "").strip(),
+            outreach_inbound_domain=os.getenv("OUTREACH_INBOUND_DOMAIN", "").strip(),
             outreach_monthly_limit=_int("OUTREACH_MONTHLY_LIMIT", 20),
             max_email_scrapes_per_run=_int("MAX_EMAIL_SCRAPES_PER_RUN", 30),
             agent_daily_budget=_int("AGENT_DAILY_BUDGET", 350),

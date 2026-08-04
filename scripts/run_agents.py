@@ -303,6 +303,7 @@ def run_pipeline(
             haiku_model=settings.haiku_model,
             max_per_run=out_cap,
             max_scrapes_per_run=settings.max_email_scrapes_per_run,
+            inbound_domain=settings.outreach_inbound_domain,
         )
         summaries["outreach"] = outreach.run()
         budget.consume(

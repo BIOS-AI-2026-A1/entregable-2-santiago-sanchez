@@ -36,21 +36,28 @@ class ResendClient:
         subject: str,
         text: str,
         from_address: str = SANDBOX_FROM,
+        reply_to: str | None = None,
     ) -> str:
         """Send one email. Returns the Resend message id.
+
+        reply_to (Outreach Etapa 2): a unique outreach+<place_id>@<inbound
+        domain>.resend.app address so a business's reply can be matched back
+        to its place by the reply webhook. Omitted from the payload entirely
+        when not set, rather than passed as a literal None.
 
         Raises RuntimeError on any transport/API error so the caller can log
         and continue, matching TavilySearchClient.search's contract.
         """
+        payload = {
+            "from": from_address,
+            "to": [to],
+            "subject": subject,
+            "text": text,
+        }
+        if reply_to:
+            payload["reply_to"] = reply_to
         try:
-            result = resend.Emails.send(
-                {
-                    "from": from_address,
-                    "to": [to],
-                    "subject": subject,
-                    "text": text,
-                }
-            )
+            result = resend.Emails.send(payload)
         except Exception as exc:  # noqa: BLE001 - normalize any SDK/transport error
             raise RuntimeError(f"Resend send failed for {to!r}: {exc}") from exc
         return result["id"]

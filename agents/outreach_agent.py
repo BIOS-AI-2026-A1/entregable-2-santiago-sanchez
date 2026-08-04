@@ -86,6 +86,7 @@ class OutreachAgent(BaseAgent):
         haiku_model: str | None = None,
         max_per_run: int = 20,
         max_scrapes_per_run: int = 30,
+        inbound_domain: str = "",
     ):
         super().__init__(db)
         self.llm = llm
@@ -95,6 +96,13 @@ class OutreachAgent(BaseAgent):
         self.haiku_model = haiku_model
         self.max_per_run = max_per_run
         self.max_scrapes_per_run = max_scrapes_per_run
+        self.inbound_domain = inbound_domain
+
+    def _reply_to_for(self, place_id: str) -> str | None:
+        """Unique outreach+<place_id>@<inbound domain> address (Etapa 2) so a
+        business's reply can be matched back to its place by the reply
+        webhook. None (no Reply-To header) if inbound_domain isn't configured."""
+        return f"outreach+{place_id}@{self.inbound_domain}" if self.inbound_domain else None
 
     def _scrape_missing_emails(self) -> dict:
         """Best-effort contact_email discovery for eligible needs_review places.
@@ -190,6 +198,7 @@ class OutreachAgent(BaseAgent):
                     to=self.test_recipient,
                     subject=draft["subject"],
                     text=draft["body"],
+                    reply_to=self._reply_to_for(place_id),
                 )
             except Exception as exc:  # noqa: BLE001
                 errors += 1
@@ -273,6 +282,7 @@ def main() -> int:
         haiku_model=settings.haiku_model,
         max_per_run=settings.outreach_monthly_limit,
         max_scrapes_per_run=settings.max_email_scrapes_per_run,
+        inbound_domain=settings.outreach_inbound_domain,
     )
 
     summary = agent.run()

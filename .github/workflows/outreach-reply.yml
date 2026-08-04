@@ -1,0 +1,38 @@
+# Outreach Agent - Etapa 2 reply handler.
+# Fires only when a business replies to an Etapa 1 confirmation email — never
+# on a schedule. The Supabase Edge Function (supabase/functions/outreach-reply/)
+# verifies the inbound webhook, persists the reply, and dispatches this event;
+# this workflow then runs the actual re-evaluation in Python, reusing the same
+# Validator rubric as the daily pipeline (agents/outreach_reply_handler.py).
+name: Outreach reply handler
+
+on:
+  repository_dispatch:
+    types: [outreach_reply_received]
+
+permissions:
+  contents: read
+
+jobs:
+  revalidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Re-evaluate place with the business's reply
+        run: |
+          python -m agents.outreach_reply_handler --place-id "${{ github.event.client_payload.place_id }}"

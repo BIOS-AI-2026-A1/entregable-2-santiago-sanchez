@@ -299,6 +299,8 @@ Target (functional product — see **## Architecture**):
 │   ├── web_agent.py
 │   ├── validator_agent.py
 │   ├── updater_agent.py
+│   ├── outreach_agent.py       # Etapa 1: outreach_send
+│   ├── outreach_reply_handler.py  # Etapa 2: reply re-evaluation (repository_dispatch only)
 │   └── clients/{supabase_client,google_places,tavily_client,llm,
 │       resend_client,website_scraper}.py
 ├── mcp_server/                 # AI toolkit — MCP server
@@ -306,6 +308,10 @@ Target (functional product — see **## Architecture**):
 │   └── README.md
 ├── skills/                     # AI toolkit — reusable skills
 │   └── validator-rubric/SKILL.md
+├── supabase/functions/
+│   └── outreach-reply/         # Edge Function: Etapa 2 webhook receiver (Deno/TS)
+│       ├── index.ts
+│       └── index.test.ts
 ├── config/
 │   ├── settings.py             # env-driven config (python-dotenv)
 │   └── targets.yaml            # countries/cities + search terms
@@ -316,7 +322,7 @@ Target (functional product — see **## Architecture**):
 │   ├── schema.sql              # tables, constraints, indexes, RLS, triggers
 │   └── seed.sql                # manual seed (UY/AR)
 ├── tests/                      # offline unit tests (external calls mocked)
-├── .github/workflows/{agents-monthly,deploy-pages}.yml
+├── .github/workflows/{agents-monthly,deploy-pages,outreach-reply}.yml
 ├── requirements.txt
 ├── .env.example
 ├── README.md  CLAUDE.md  prompts.md  .gitignore
@@ -711,6 +717,102 @@ Validator) is not yet built.
   the first bullet above); it's stored for when a verified sending domain
   makes real per-business delivery possible.
 
+### Outreach reply webhook (Etapa 2) design decisions
+
+`docs/plans/PLAN-outreach-agent.md`'s Etapa 2 (`outreach_reply_handler`) —
+re-evaluating a place after a business replies to the Etapa 1 email — spans
+three systems: `supabase/functions/outreach-reply/index.ts` (a Deno/TS
+Supabase Edge Function, the webhook receiver), `.github/workflows/outreach-reply.yml`
+(GitHub Actions, `repository_dispatch`-triggered), and
+`agents/outreach_reply_handler.py` (Python, the actual re-evaluation).
+
+- **Split across languages by design, not accident.** The webhook receiver
+  must be a Supabase Edge Function (Deno/TS) — but the actual LLM
+  re-evaluation must reuse `RUBRIC` / `ValidatorAgent._normalize` from
+  `agents/validator_agent.py` **unmodified**, per this project's standing
+  rule that the health-sensitive rubric has exactly one source of truth (see
+  the Core Prompt section). Those two constraints only reconcile one way:
+  the Edge Function does webhook mechanics only (verify the signature,
+  resolve `place_id`, fetch the reply body, persist it, flip
+  `outreach_status`); it fires a GitHub `repository_dispatch` event
+  (`outreach_reply_received`, `client_payload: {place_id}`) to
+  `santisanchez4/CeliacMap`, and `.github/workflows/outreach-reply.yml` runs
+  `python -m agents.outreach_reply_handler --place-id <id>` — the only place
+  the LLM is actually called. This mirrors how every other agent in this
+  repo already only executes via GitHub Actions; there is no persistent
+  Python server anywhere in this project. The alternative (porting the
+  rubric + confidence gates into TypeScript so the Edge Function could
+  respond in one hop) was rejected — it would create a second,
+  separately-maintained copy of the one quality gate a health-sensitive
+  product depends on.
+- **Reply-to encodes the place_id — no separate lookup table.**
+  `ResendClient.send` gains an optional `reply_to`; `OutreachAgent` builds
+  `outreach+<place_id>@<OUTREACH_INBOUND_DOMAIN>` (the account's
+  auto-assigned `*.resend.app` inbound address — confirmed via Resend's docs
+  that any plus-addressed variant reaches the webhook, no custom domain
+  needed) per send. The reply's `to` header carries this straight back, so
+  the Edge Function matches a reply to its place with a regex, no state to
+  keep in sync. Degrades gracefully (no Reply-To header at all) when
+  `OUTREACH_INBOUND_DOMAIN` is unset.
+- **Signature verification is manual Svix HMAC, not the `resend`/`svix`
+  npm package's convenience method.** `resend.webhooks.verify()`, assumed
+  from Resend's docs while researching this feature, turned out not to
+  exist in the actually-installed `resend@4.8.0` — confirmed the hard way
+  when `deno check` also caught a second, unrelated wrong assumption in the
+  same file (`emails.receiving.get()`, fixed to the SDK's own
+  `resend.get<T>('/emails/receiving/{id}')`). Rather than chase the SDK's
+  exact (and evidently unstable/undocumented-in-package) surface for the one
+  security-critical check, it implements the documented Svix algorithm
+  directly against Web Crypto (`svix-id`.`svix-timestamp`.`<raw body>`,
+  HMAC-SHA256 with the base64-decoded `whsec_...` secret, constant-time
+  compare, ±5 min timestamp tolerance) — one less external dependency to
+  drift out from under this file. `deno check` passes and `deno test`
+  passes 6/6 (place_id extraction only); the signature algorithm itself
+  still needs a live webhook test with a real Resend-signed request before
+  it's trusted in production — type-checking proves the code compiles, not
+  that the crypto matches Resend's actual signing.
+- **Status remap sits on top of the unmodified `_decide_status` output — all
+  three of its outcomes are allowed through, not just two.**
+  `docs/plans/PLAN-outreach-agent.md` and ADR-002 name two outcomes
+  (`outreach_confirmed` / `needs_review`), but reusing `_decide_status`
+  unmodified also yields `discarded` if the business's own reply is itself
+  disqualifying. Decided (during planning) to allow it: more conservative,
+  matches ADR-001's "never overestimate safety" ethos, and needs zero
+  special-casing of already-battle-tested logic.
+  ```
+  verdict (from _decide_status, unchanged) -> db status
+    approved      -> outreach_confirmed   (never approved directly — ADR-002)
+    needs_review  -> needs_review          (unchanged)
+    discarded     -> discarded             (unchanged — ADR-001's own gate)
+  ```
+- **Idempotency — a full unique constraint on `(place_id, external_id)`,
+  same "full, not partial" precedent as `places_source_external_id_key`.**
+  Resend redelivers a webhook on any non-2xx response; the Edge Function
+  stores Resend's `email_id` as `outreach_messages.external_id` so a
+  redelivery can't double-insert the same reply. A `23505` unique-violation
+  on insert is treated as success (already recorded), not an error. A place
+  already in a resolved status (`approved`/`discarded`) when a reply arrives
+  is also short-circuited (200, no dispatch) — a duplicate/late reply must
+  not re-trigger a stale re-evaluation; `outreach_confirmed` is still
+  actionable, since a later reply in the same thread should be able to
+  update it further.
+- **Response codes are deliberate.** 401 = bad signature (no writes, no
+  dispatch). 200 = verified but not actionable — wrong event type, no
+  `place_id` match, unknown place, or already-resolved place — logged, not
+  retried, since redelivery wouldn't change the outcome. 500 = verified and
+  actionable but a step failed (content fetch / Supabase write / GitHub
+  dispatch) — retryable, so Resend's automatic redelivery can recover from a
+  transient failure.
+- **Two distinct secret stores, on purpose.** `RESEND_WEBHOOK_SECRET` and
+  `GITHUB_DISPATCH_TOKEN` (a fine-grained PAT scoped to this repo only) are
+  Supabase Edge Function secrets (`supabase secrets set`) — they're only
+  ever needed inside the Edge Function, never in `.env` or GitHub Actions
+  secrets. `.github/workflows/outreach-reply.yml` reuses the same three
+  GitHub Actions secrets `agents-monthly.yml` already has
+  (`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`ANTHROPIC_API_KEY`) — no new
+  ones needed there, since the Python side never calls Resend or GitHub
+  itself.
+
 ### Build status (phases)
 
 - ✅ **Phase 1–2 — Landing page + editorial redesign.** Responsive bilingual
@@ -884,6 +986,42 @@ Validator) is not yet built.
   standalone `python -m agents.outreach_agent` run confirming `contact_email`
   / `contact_email_checked_at` populate for real `needs_review` places and
   aren't re-scraped on a second run.
+- 🚧 **Phase 17 — Outreach Agent Etapa 2 (reply webhook, design + code
+  complete, not yet deployed).** `supabase/functions/outreach-reply/index.ts`
+  (this repo's first Edge Function), `.github/workflows/outreach-reply.yml`,
+  and `agents/outreach_reply_handler.py` implement the full reply flow —
+  webhook receipt → Python re-evaluation reusing `RUBRIC` /
+  `ValidatorAgent._normalize` unmodified → `outreach_confirmed` /
+  `needs_review` / `discarded`. See **Outreach reply webhook (Etapa 2)
+  design decisions** above for the full architecture and every design
+  choice. `agents/outreach_agent.py` and `agents/clients/resend_client.py`
+  gained `reply_to` support (`OUTREACH_INBOUND_DOMAIN` setting). Schema
+  additions proposed in `db/schema.sql` (not yet applied):
+  `outreach_messages.external_id` + a unique `(place_id, external_id)`
+  constraint, and `agent_log.agent` widened for `'outreach_reply'`. Full
+  offline suite green (183 tests, +14). Deno was installed and
+  `deno check` run for real against the Edge Function (not just the
+  editor's Node-based TS server, which can't resolve `npm:` specifiers or
+  the `Deno` global) — it caught a genuine bug: `resend@4.8.0`'s typed SDK
+  has no `emails.receiving` namespace at all (an assumption from Resend's
+  docs alone, not the installed package), fixed by calling the SDK's own
+  public low-level `resend.get<T>('/emails/receiving/{id}')` instead, the
+  same method every typed resource in the SDK is itself built on. Also
+  restructured `Deno.serve(...)` behind an `import.meta.main` guard
+  (`export function handleRequest`) after `deno test` revealed the webhook
+  handler was starting a live HTTP server as an import side-effect merely by
+  importing the file for its pure `extractPlaceId` helper. `deno check`
+  passes clean on both `index.ts` and `index.test.ts`; `deno test` passes
+  6/6. **Not yet live:** apply the two schema additions;
+  `supabase functions deploy outreach-reply`; set the 3 Edge Function
+  secrets (`RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`,
+  `GITHUB_DISPATCH_TOKEN`); configure the Resend `email.received` webhook
+  pointing at the deployed function URL; set `OUTREACH_INBOUND_DOMAIN`.
+  Next verification: send one real Etapa 1 email, reply to it from an
+  external inbox, and confirm the full chain (Edge Function 200 →
+  `outreach_messages` row → GitHub Actions run → `places.status` update)
+  end to end; then a duplicate-reply / redelivered-webhook test to confirm
+  the idempotency guard holds.
 
 ### GitHub Pages deploy decision
 
