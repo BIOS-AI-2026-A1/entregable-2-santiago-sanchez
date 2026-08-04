@@ -32,6 +32,7 @@ def make_agent(
     max_scrapes_per_run=30,
     test_recipient="dev@example.com",
     inbound_domain="",
+    sender_email="outreach@celiacmap.org",
 ):
     db = MagicMock()
     db.fetch_needs_review_for_outreach.return_value = [make_place()]
@@ -54,6 +55,7 @@ def make_agent(
         max_per_run=max_per_run,
         max_scrapes_per_run=max_scrapes_per_run,
         inbound_domain=inbound_domain,
+        sender_email=sender_email,
     )
     return agent, db, llm, resend_client, scraper
 
@@ -116,6 +118,7 @@ def test_successful_draft_and_send():
         to="dev@example.com",
         subject="Confirmacion sin TACC - Cafe X",
         text="Hola, somos el equipo de CeliacMap...",
+        from_address="outreach@celiacmap.org",
         reply_to=None,
     )
     db.insert_outreach_message.assert_called_once()
@@ -313,3 +316,14 @@ def test_reply_to_built_from_place_id_when_inbound_domain_set():
     agent.run()
 
     assert resend_client.send.call_args.kwargs["reply_to"] == "outreach+place-42@abc123.resend.app"
+
+
+# --- Sender identity ---------------------------------------------------------
+
+
+def test_send_uses_configured_sender_email():
+    agent, db, llm, resend_client, _ = make_agent(sender_email="hola@celiacmap.org")
+
+    agent.run()
+
+    assert resend_client.send.call_args.kwargs["from_address"] == "hola@celiacmap.org"

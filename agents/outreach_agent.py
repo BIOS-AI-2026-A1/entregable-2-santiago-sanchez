@@ -87,6 +87,7 @@ class OutreachAgent(BaseAgent):
         max_per_run: int = 20,
         max_scrapes_per_run: int = 30,
         inbound_domain: str = "",
+        sender_email: str = "outreach@celiacmap.org",
     ):
         super().__init__(db)
         self.llm = llm
@@ -97,6 +98,7 @@ class OutreachAgent(BaseAgent):
         self.max_per_run = max_per_run
         self.max_scrapes_per_run = max_scrapes_per_run
         self.inbound_domain = inbound_domain
+        self.sender_email = sender_email
 
     def _reply_to_for(self, place_id: str) -> str | None:
         """Unique outreach+<place_id>@<inbound domain> address (Etapa 2) so a
@@ -198,6 +200,7 @@ class OutreachAgent(BaseAgent):
                     to=self.test_recipient,
                     subject=draft["subject"],
                     text=draft["body"],
+                    from_address=self.sender_email,
                     reply_to=self._reply_to_for(place_id),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -283,6 +286,7 @@ def main() -> int:
         max_per_run=settings.outreach_monthly_limit,
         max_scrapes_per_run=settings.max_email_scrapes_per_run,
         inbound_domain=settings.outreach_inbound_domain,
+        sender_email=settings.outreach_sender_email,
     )
 
     summary = agent.run()

@@ -7,11 +7,20 @@ rather than a per-instance client like ``googlemaps.Client`` / ``TavilyClient`` 
 at the call site, on the assumption that only one instance is ever live per
 process (true today: the orchestrator builds exactly one).
 
-Sandbox note: without a verified sending domain, ``onboarding@resend.dev`` can
-only deliver to the email address that owns the Resend account — not to
-arbitrary businesses. The Outreach agent currently sends every message to a
-fixed test recipient for this reason (see CLAUDE.md's Outreach agent design
-decisions).
+Sender identity: the Outreach agent passes its own ``from_address`` (read from
+``Settings.outreach_sender_email`` / ``OUTREACH_SENDER_EMAIL``, default
+``outreach@celiacmap.org``) rather than relying on ``SANDBOX_FROM`` below —
+sending from that address requires the domain to be verified with Resend.
+``SANDBOX_FROM`` remains this wrapper's fallback default for any caller that
+doesn't specify one.
+
+Sandbox note (recipient, unrelated to the sender change above): without a
+verified sending domain, ``onboarding@resend.dev`` can only deliver to the
+email address that owns the Resend account — not to arbitrary businesses. The
+Outreach agent currently sends every message to a fixed test recipient for
+this reason (see CLAUDE.md's Outreach agent design decisions); switching the
+recipient to a real per-business address is a separate, not-yet-resolved
+decision (ADR-003).
 """
 
 from __future__ import annotations
@@ -20,6 +29,8 @@ import resend
 
 # Resend's shared sandbox sender — usable without verifying a custom domain,
 # but restricted to delivering only to the account's own verified email.
+# Kept as this wrapper's default for send(); the Outreach agent overrides it
+# with a configured sender (see module docstring above).
 SANDBOX_FROM = "onboarding@resend.dev"
 
 

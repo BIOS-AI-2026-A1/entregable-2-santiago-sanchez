@@ -675,6 +675,18 @@ Validator) is not yet built.
   real `needs_review` candidate; only the physical send destination is the
   test inbox. Real per-business delivery is future work once a domain is
   verified and a real contact-email source is added.
+- **Sender identity — configurable via settings, defaults to
+  `outreach@celiacmap.org`.** The `from` address changed from Resend's shared
+  sandbox sender (`onboarding@resend.dev`) to a project-owned address, read
+  from `Settings.outreach_sender_email` / env `OUTREACH_SENDER_EMAIL`
+  (following the settings-over-hardcoding convention used for every other
+  configurable value) rather than hardcoded in `resend_client.py`; the
+  `ResendClient.send` default (`SANDBOX_FROM`) stays as the wrapper's generic
+  fallback for callers that don't pass one, but `OutreachAgent` always does.
+  Sending from `outreach@celiacmap.org` requires that domain to be verified
+  with Resend — purely a sender-identity change, orthogonal to the recipient
+  (still the fixed `OUTREACH_TEST_RECIPIENT`; switching to real per-business
+  recipients is ADR-003, not yet resolved).
 - **Selection — phone or website present, oldest first, not yet contacted.**
   `SupabaseClient.fetch_needs_review_for_outreach` filters
   `status='needs_review'` and `outreach_status='not_sent'`, ordered oldest

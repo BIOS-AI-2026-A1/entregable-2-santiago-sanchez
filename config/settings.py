@@ -68,6 +68,10 @@ class Settings:
     # this fixed test recipient until a custom domain is verified with Resend.
     resend_api_key: str = ""
     outreach_test_recipient: str = ""
+    # Outreach agent sender identity. Requires a domain verified with Resend
+    # to actually deliver (see .env.example); the recipient stays the fixed
+    # test address regardless (ADR-003 not yet resolved).
+    outreach_sender_email: str = "outreach@celiacmap.org"
     # Outreach Etapa 2 (reply webhook): the account's <id>.resend.app inbound
     # receiving domain, used to build a unique outreach+<place_id>@<domain>
     # Reply-To per send so a business's reply can be matched back to its
@@ -106,6 +110,9 @@ class Settings:
             max_suggestions_per_run=_int("MAX_SUGGESTIONS_PER_RUN", 30),
             resend_api_key=os.getenv("RESEND_API_KEY", "").strip(),
             outreach_test_recipient=os.getenv("OUTREACH_TEST_RECIPIENT", "").strip(),
+            outreach_sender_email=os.getenv(
+                "OUTREACH_SENDER_EMAIL", "outreach@celiacmap.org"
+            ).strip(),
             outreach_inbound_domain=os.getenv("OUTREACH_INBOUND_DOMAIN", "").strip(),
             outreach_monthly_limit=_int("OUTREACH_MONTHLY_LIMIT", 20),
             max_email_scrapes_per_run=_int("MAX_EMAIL_SCRAPES_PER_RUN", 30),
